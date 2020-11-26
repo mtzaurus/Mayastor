@@ -2558,11 +2558,13 @@ name = "mbus_api"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "composer",
  "dyn-clonable",
  "env_logger",
  "log",
  "nats",
  "once_cell",
+ "rpc",
  "serde",
  "serde_json",
  "smol",
@@ -2572,6 +2574,8 @@ dependencies = [
  "strum_macros",
  "tokio",
  "tracing",
+ "tracing-futures",
+ "tracing-subscriber",
 ]
 
 [[package]]
