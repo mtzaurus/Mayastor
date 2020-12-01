@@ -1,28 +1,172 @@
+// clippy warning caused by the instrument macro
+#![allow(clippy::unit_arg)]
+
 use crate::{v0::*, *};
 use async_trait::async_trait;
 
 /// Error sending/receiving
-pub type Error = crate::Error;
-/// Result for sending/receiving
-pub type BusResult<T> = crate::BusResult<T>;
+/// Common error type for send/receive
+#[derive(Debug, Snafu, strum_macros::AsRefStr)]
+#[allow(missing_docs)]
+pub enum BusError {
+    #[snafu(display("Bus Internal error"))]
+    MessageBusError { source: Error },
+    #[snafu(display("Resource not unique"))]
+    NotUnique,
+    #[snafu(display("Resource not found"))]
+    NotFound,
+}
 
-/// Mayastor Node
+impl From<Error> for BusError {
+    fn from(source: Error) -> Self {
+        BusError::MessageBusError {
+            source,
+        }
+    }
+}
+
+/// Result for sending/receiving
+pub type BusResult<T> = Result<T, BusError>;
+
+/// Node
 pub type Node = crate::v0::Node;
+/// Nodes list
+pub type Nodes = crate::v0::Nodes;
+/// Pool
+pub type Pool = crate::v0::Pool;
+/// Pool list
+pub type Pools = crate::v0::Pools;
+/// Replica
+pub type Replica = crate::v0::Replica;
+/// Replica list
+pub type Replicas = crate::v0::Replicas;
+/// Protocol
+pub type Protocol = crate::v0::Protocol;
+/// Replica Create
+pub type CreateReplica = crate::v0::CreateReplica;
+/// Pool Create
+pub type CreatePool = crate::v0::CreatePool;
+/// Replica Destroy
+pub type DestroyReplica = crate::v0::DestroyReplica;
+/// Pool Destroy
+pub type DestroyPool = crate::v0::DestroyPool;
+/// Replica Share
+pub type ShareReplica = crate::v0::ShareReplica;
+/// Replica Unshare
+pub type UnshareReplica = crate::v0::UnshareReplica;
+/// Query Filter
+pub type Filter = crate::v0::Filter;
+
+macro_rules! only_one {
+    ($list:ident) => {
+        if let Some(obj) = $list.first() {
+            if $list.len() > 1 {
+                Err(BusError::NotUnique)
+            } else {
+                Ok(obj.clone())
+            }
+        } else {
+            Err(BusError::NotFound)
+        }
+    };
+}
 
 /// Interface used by the rest service to interact with the control plane
 /// services via the message bus
 #[async_trait]
 pub trait MessageBusTrait: Sized {
     /// Get all known nodes from the registry
-    #[tracing::instrument(level = "info")]
+    #[tracing::instrument(level = "debug", err)]
     async fn get_nodes() -> BusResult<Vec<Node>> {
-        GetNodes {}.request().await.map(|v| v.0)
+        let nodes = GetNodes {}.request().await?;
+        Ok(nodes.0)
     }
-    /// Get a node through its id
-    #[tracing::instrument(level = "info")]
-    async fn get_node(id: String) -> BusResult<Option<Node>> {
+
+    /// Get node with `id`
+    #[tracing::instrument(level = "debug", err)]
+    async fn get_node(id: &str) -> BusResult<Node> {
         let nodes = Self::get_nodes().await?;
-        Ok(nodes.into_iter().find(|n| n.id == id))
+        let nodes =
+            nodes.into_iter().filter(|n| n.id == id).collect::<Vec<_>>();
+        only_one!(nodes)
+    }
+
+    /// Get pool with filter
+    #[tracing::instrument(level = "debug", err)]
+    async fn get_pool(filter: Filter) -> BusResult<Pool> {
+        let pools = Self::get_pools(filter).await?;
+        only_one!(pools)
+    }
+
+    /// Get pools with filter
+    #[tracing::instrument(level = "debug", err)]
+    async fn get_pools(filter: Filter) -> BusResult<Vec<Pool>> {
+        let pools = GetPools {
+            filter,
+        }
+        .request()
+        .await?;
+        Ok(pools.0)
+    }
+
+    /// create pool
+    #[tracing::instrument(level = "debug", err)]
+    async fn create_pool(request: CreatePool) -> BusResult<Pool> {
+        let pool = request.request().await?;
+        Ok(pool)
+    }
+
+    /// destroy pool
+    #[tracing::instrument(level = "debug", err)]
+    async fn destroy_pool(request: DestroyPool) -> BusResult<()> {
+        request.request().await?;
+        Ok(())
+    }
+
+    /// Get replica with filter
+    #[tracing::instrument(level = "debug", err)]
+    async fn get_replica(filter: Filter) -> BusResult<Replica> {
+        let replicas = Self::get_replicas(filter).await?;
+        only_one!(replicas)
+    }
+
+    /// Get replicas with filter
+    #[tracing::instrument(level = "debug", err)]
+    async fn get_replicas(filter: Filter) -> BusResult<Vec<Replica>> {
+        let replicas = GetReplicas {
+            filter,
+        }
+        .request()
+        .await?;
+        Ok(replicas.0)
+    }
+
+    /// create replica
+    #[tracing::instrument(level = "debug", err)]
+    async fn create_replica(request: CreateReplica) -> BusResult<Replica> {
+        let replica = request.request().await?;
+        Ok(replica)
+    }
+
+    /// destroy replica
+    #[tracing::instrument(level = "debug", err)]
+    async fn destroy_replica(request: DestroyReplica) -> BusResult<()> {
+        request.request().await?;
+        Ok(())
+    }
+
+    /// create replica
+    #[tracing::instrument(level = "debug", err)]
+    async fn share_replica(request: ShareReplica) -> BusResult<String> {
+        let replica = request.request().await?;
+        Ok(replica)
+    }
+
+    /// create replica
+    #[tracing::instrument(level = "debug", err)]
+    async fn unshare_replica(request: UnshareReplica) -> BusResult<()> {
+        let _ = request.request().await?;
+        Ok(())
     }
 }
 
@@ -118,14 +262,14 @@ mod tests {
                 state: NodeState::Online,
             }
         );
-        let node = MessageBus::get_node(mayastor.to_string()).await?;
+        let node = MessageBus::get_node(mayastor).await?;
         assert_eq!(
             node,
-            Some(Node {
+            Node {
                 id: mayastor.to_string(),
                 grpc_endpoint: "0.0.0.0:10124".to_string(),
                 state: NodeState::Online,
-            })
+            }
         );
 
         test.stop("mayastor").await?;
