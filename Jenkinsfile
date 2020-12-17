@@ -68,6 +68,7 @@ pipeline {
         ])
       }
     }
+    /*
     stage('linter') {
       agent { label 'nixos-mayastor' }
       when {
@@ -135,6 +136,7 @@ pipeline {
         }
       }
     }
+    */
     stage('e2e tests') {
       agent { label 'nixos-mayastor' }
       environment {
@@ -155,7 +157,13 @@ pipeline {
         sh "./scripts/release.sh --alias-tag ci --registry ${env.REGISTRY}"
         withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG')]) {
           sh 'kubectl get nodes -o wide'
-          sh "nix-shell --run './scripts/e2e-test.sh --device /dev/nvme1n1 --tag \"${env.GIT_COMMIT_SHORT}\" --registry \"${env.REGISTRY}\"'"
+          script {
+            def cmd = "./scripts/e2e-test.sh --device /dev/nvme1n1 --tag \"${env.GIT_COMMIT_SHORT}\" --registry \"${env.REGISTRY}\""
+            if (env.BRANCH_NAME != 'test-jenkins' && env.BRANCH_NAME != 'trying') {
+              cmd = cmd + " --long"
+            }
+            sh "nix-shell --run '${cmd}'"
+          }
         }
       }
       // Always remove all docker images because they are usually used just once

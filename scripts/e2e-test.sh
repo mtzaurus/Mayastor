@@ -4,6 +4,8 @@ set -eux
 
 SCRIPTDIR=$(dirname "$(realpath "$0")")
 TESTS="install basic_volume_io"
+LONG_TESTS=""
+RUN_LONG_TESTS=
 DEVICE=
 REGISTRY=
 TAG=
@@ -16,6 +18,7 @@ Options:
   --device <path>           Device path to use for storage pools.
   --registry <host[:port]>  Registry to pull the mayastor images from.
   --tag <name>              Docker image tag of mayastor images (default "ci")
+  --long                    Run long running tests also.
 
 Examples:
   $0 --registry 127.0.0.1:5000 --tag a80ce0c
@@ -28,6 +31,10 @@ while [ "$#" -gt 0 ]; do
     -d|--device)
       shift
       DEVICE=$1
+      shift
+      ;;
+    -l|--long)
+      RUN_LONG_TESTS=1
       shift
       ;;
     -r|--registry)
@@ -74,6 +81,16 @@ for dir in $TESTS; do
     break
   fi
 done
+
+if [ -z "$test_failed" ] && [ -n "$RUN_LONG_TESTS" ]; then
+  for dir in $LONG_TESTS; do
+    cd "$SCRIPTDIR/../test/e2e/$dir"
+    if ! go test -v . -ginkgo.v -ginkgo.progress -timeout 0 ; then
+      test_failed=1
+      break
+    fi
+  done
+fi
 
 # must always run uninstall test in order to clean up the cluster
 cd "$SCRIPTDIR/../test/e2e/uninstall"
