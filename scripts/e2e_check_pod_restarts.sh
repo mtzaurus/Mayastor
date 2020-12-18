@@ -2,6 +2,8 @@
 
 set -e
 
+# Useful to record what the script is checking so dump then check.
+kubectl get pods -n mayastor
 # typical output for kubectl get pods -n mayastor is,
 # collect the restart values
 #NAME                    READY   STATUS    RESTARTS   AGE

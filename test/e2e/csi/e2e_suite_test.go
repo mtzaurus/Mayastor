@@ -27,7 +27,7 @@ import (
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
-//	"github.com/pborman/uuid"
+	//	"github.com/pborman/uuid"
 	"k8s.io/kubernetes/test/e2e/framework"
 	"k8s.io/kubernetes/test/e2e/framework/config"
 )
@@ -38,7 +38,7 @@ const (
 
 var (
 	defaultStorageClassParameters = map[string]string{
-		"repl":  "1",
+		"repl":     "1",
 		"protocol": "nvmf",
 	}
 )
@@ -74,10 +74,10 @@ func handleFlags() {
 }
 
 func execTestCmd(cmds []testCmd) {
-	err := os.Chdir("../..")
+	err := os.Chdir("../../..")
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	defer func() {
-		err := os.Chdir("test/csi-e2e")
+		err := os.Chdir("test/e2e/csi")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	}()
 

@@ -42,6 +42,13 @@ func deleteDeployYaml(filename string) {
 	Expect(err).ToNot(HaveOccurred())
 }
 
+// Helper for deleting mayastor CRDs
+func deleteCRD(crdName string) {
+	cmd := exec.Command("kubectl", "delete", "crd", crdName)
+	_, err := cmd.CombinedOutput()
+	Expect(err).ToNot(HaveOccurred())
+}
+
 // Encapsulate the logic to find where the templated yamls are
 func getTemplateYamlDir() string {
 	_, filename, _, _ := runtime.Caller(0)
@@ -68,11 +75,14 @@ func mayastorReadyPodCount() int {
 func teardownMayastor() {
 	deleteDeployYaml("mayastor-daemonset.yaml")
 	deleteDeployYaml("moac-deployment.yaml")
+
 	deleteDeployYaml("csi-daemonset.yaml")
 	deleteDeployYaml("nats-deployment.yaml")
 	deleteDeployYaml("mayastorpoolcrd.yaml")
 	deleteDeployYaml("moac-rbac.yaml")
 	deleteDeployYaml("storage-class.yaml")
+	deleteCRD("mayastornodes.openebs.io")
+	deleteCRD("mayastorvolumes.openebs.io")
 	deleteDeployYaml("namespace.yaml")
 
 	Eventually(mayastorReadyPodCount,
@@ -93,7 +103,7 @@ var _ = Describe("Mayastor setup", func() {
 })
 
 var _ = BeforeSuite(func(done Done) {
-	logf.SetLogger(zap.LoggerTo(GinkgoWriter, true))
+	logf.SetLogger(zap.New(zap.UseDevMode(true), zap.WriteTo(GinkgoWriter)))
 
 	By("bootstrapping test environment")
 	useCluster := true
@@ -119,7 +129,7 @@ var _ = BeforeSuite(func(done Done) {
 
 	mgrSyncCtx, mgrSyncCtxCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer mgrSyncCtxCancel()
-	if synced := k8sManager.GetCache().WaitForCacheSync(mgrSyncCtx.Done()); !synced {
+	if synced := k8sManager.GetCache().WaitForCacheSync(mgrSyncCtx); !synced {
 		fmt.Println("Failed to sync")
 	}
 
