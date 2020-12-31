@@ -127,7 +127,14 @@ impl NexusFnTable {
         let io_type = nio.io_type();
         match io_type {
             IoType::Read => nexus.readv(&nio, &mut ch),
-            IoType::Write => nexus.writev(&nio, &ch),
+            IoType::Write => {
+                // a more efficient test compared to io_is_supported
+                if !nexus.read_only {
+                    nexus.writev(&nio, &ch);
+                } else {
+                    nio.fail();
+                }
+            }
             IoType::Reset => {
                 trace!("{}: Dispatching RESET", nexus.bdev.name());
                 nexus.reset(&nio, &ch)
