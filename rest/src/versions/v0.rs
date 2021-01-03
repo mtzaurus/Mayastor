@@ -1,5 +1,5 @@
 use super::super::ActixRestClient;
-use actix_web::{body::Body, HttpResponse};
+use actix_web::{body::Body, HttpResponse, ResponseError};
 use async_trait::async_trait;
 use mbus_api::{
     message_bus::{v0, v0::BusError},
@@ -264,6 +264,11 @@ pub trait RestClient {
         &self,
         args: AddNexusChild,
     ) -> anyhow::Result<Child>;
+    /// Get all children by filter
+    async fn get_nexus_children(
+        &self,
+        filter: Filter,
+    ) -> anyhow::Result<Vec<Child>>;
     /// Get all volumes by filter
     async fn get_volumes(&self, filter: Filter) -> anyhow::Result<Vec<Volume>>;
     /// Create volume
@@ -284,6 +289,8 @@ enum RestURNs {
     GetReplicas(Replica),
     #[strum(serialize = "nexuses")]
     GetNexuses(Nexus),
+    #[strum(serialize = "children")]
+    GetChildren(Child),
     #[strum(serialize = "volumes")]
     GetVolumes(Volume),
     /* does not work as expect as format! only takes literals...
@@ -342,6 +349,13 @@ fn get_filtered_urn(filter: Filter, r: &RestURNs) -> anyhow::Result<String> {
             Filter::Node(n) => format!("nodes/{}/nexuses", n),
             Filter::NodeNexus(n, x) => format!("nodes/{}/nexuses/{}", n, x),
             Filter::Nexus(x) => format!("nexuses/{}", x),
+            _ => return Err(anyhow::Error::msg("Invalid filter for nexuses")),
+        },
+        RestURNs::GetChildren(_) => match filter {
+            Filter::NodeNexus(n, x) => {
+                format!("nodes/{}/nexuses/{}/children", n, x)
+            }
+            Filter::Nexus(x) => format!("nexuses/{}/children", x),
             _ => return Err(anyhow::Error::msg("Invalid filter for nexuses")),
         },
         RestURNs::GetVolumes(_) => match filter {
@@ -442,6 +456,14 @@ impl RestClient for ActixRestClient {
     async fn get_nexuses(&self, filter: Filter) -> anyhow::Result<Vec<Nexus>> {
         let nexuses = get_filter!(self, filter, GetNexuses).await?;
         Ok(nexuses)
+    }
+
+    async fn get_nexus_children(
+        &self,
+        filter: Filter,
+    ) -> anyhow::Result<Vec<Child>> {
+        let children = get_filter!(self, filter, GetChildren).await?;
+        Ok(children)
     }
 
     async fn create_nexus(&self, args: CreateNexus) -> anyhow::Result<Nexus> {
@@ -558,6 +580,8 @@ pub struct RestError {
     pub kind: BusError,
     pub message: String,
 }
+
+impl ResponseError for RestError {}
 
 impl From<BusError> for RestError {
     fn from(kind: BusError) -> Self {

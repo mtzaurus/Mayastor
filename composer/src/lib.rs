@@ -149,7 +149,21 @@ impl Binary {
         }
         self
     }
+    /// pick up the nats argument name for a particular binary from nats_arg
+    /// and fill up the nats server endpoint using the network name
+    fn setup_nats(&mut self, network: &str) {
+        if !self.nats_arg.is_empty() {
+            self.arguments.push(self.nats_arg.clone());
+            self.arguments.push(format!("nats.{}:4222", network));
+            self.nats_arg = String::new();
+        }
+    }
 
+    fn commands(&self) -> Vec<String> {
+        let mut v = vec![self.path.clone()];
+        v.extend(self.arguments.clone());
+        v
+    }
     fn which(name: &str) -> std::io::Result<String> {
         let output = std::process::Command::new("which").arg(name).output()?;
         Ok(String::from_utf8_lossy(&output.stdout).trim().into())
@@ -163,15 +177,7 @@ impl Binary {
     }
 }
 
-impl Into<Vec<String>> for Binary {
-    fn into(self) -> Vec<String> {
-        let mut v = vec![self.path.clone()];
-        v.extend(self.arguments);
-        v
-    }
-}
-
-const RUST_LOG: &str =
+const RUST_LOG_DEFAULT: &str =
     "debug,actix_web=debug,actix=debug,h2=info,hyper=info,tower_buffer=info,bollard=info,rustls=info";
 
 /// Specs of the allowed containers include only the binary path
@@ -180,8 +186,14 @@ const RUST_LOG: &str =
 pub struct ContainerSpec {
     /// Name of the container
     name: ContainerName,
-    /// Binary configuration
-    binary: Binary,
+    /// Base image of the container
+    image: Option<String>,
+    /// Command to run
+    command: Option<String>,
+    /// command arguments to run
+    arguments: Option<Vec<String>>,
+    /// local binary
+    binary: Option<Binary>,
     /// Port mapping to host ports
     port_map: Option<PortMap>,
     /// Use Init container
@@ -189,25 +201,33 @@ pub struct ContainerSpec {
     /// Key-Map of environment variables
     /// Starts with RUST_LOG=debug,h2=info
     env: HashMap<String, String>,
-}
-
-impl Into<Vec<String>> for &ContainerSpec {
-    fn into(self) -> Vec<String> {
-        self.binary.clone().into()
-    }
+    nats_arg: String,
 }
 
 impl ContainerSpec {
     /// Create new ContainerSpec from name and binary
-    pub fn new(name: &str, binary: Binary) -> Self {
+    pub fn from_binary(name: &str, binary: Binary) -> Self {
         let mut env = binary.env.clone();
         if !env.contains_key("RUST_LOG") {
-            env.insert("RUST_LOG".to_string(), RUST_LOG.to_string());
+            env.insert("RUST_LOG".to_string(), RUST_LOG_DEFAULT.to_string());
         }
         Self {
             name: name.into(),
-            binary,
+            image: None,
+            binary: Some(binary),
             init: Some(true),
+            env,
+            ..Default::default()
+        }
+    }
+    /// Create new ContainerSpec from name and image
+    pub fn from_image(name: &str, image: &str) -> Self {
+        let mut env = HashMap::new();
+        env.insert("RUST_LOG".to_string(), RUST_LOG_DEFAULT.to_string());
+        Self {
+            name: name.into(),
+            init: Some(true),
+            image: Some(image.into()),
             env,
             ..Default::default()
         }
@@ -215,13 +235,17 @@ impl ContainerSpec {
     /// Add port mapping from container to host
     pub fn with_portmap(mut self, from: &str, to: &str) -> Self {
         let from = format!("{}/tcp", from);
-        let mut port_map = bollard::service::PortMap::new();
         let binding = bollard::service::PortBinding {
             host_ip: None,
             host_port: Some(to.into()),
         };
-        port_map.insert(from, Some(vec![binding]));
-        self.port_map = Some(port_map);
+        if let Some(pm) = &mut self.port_map {
+            pm.insert(from, Some(vec![binding]));
+        } else {
+            let mut port_map = bollard::service::PortMap::new();
+            port_map.insert(from, Some(vec![binding]));
+            self.port_map = Some(port_map);
+        }
         self
     }
     /// Add environment key-val, eg for setting the RUST_LOG
@@ -232,21 +256,27 @@ impl ContainerSpec {
         }
         self
     }
-    fn env_to_vec(&self) -> Vec<String> {
+
+    /// Environment variables as a vector with each element as:
+    /// "{key}={value}"
+    fn environment(&self) -> Vec<String> {
         let mut vec = vec![];
         self.env.iter().for_each(|(k, v)| {
             vec.push(format!("{}={}", k, v));
         });
         vec
     }
-    /// pick up the nats argument name for a particular binary from nats_arg
-    /// and fill up the nats server endpoint using the network name
-    fn setup_nats(&mut self, network: &str) {
-        if !self.binary.nats_arg.is_empty() {
-            self.binary.arguments.push(self.binary.nats_arg.clone());
-            self.binary.arguments.push(format!("nats.{}:4222", network));
-            self.binary.nats_arg = String::new();
+    /// Command/entrypoint followed by/and arguments
+    fn commands(&self) -> Vec<String> {
+        let mut commands = vec![];
+        if let Some(mut binary) = self.binary.clone() {
+            binary.setup_nats(&self.name);
+            commands.extend(binary.commands());
+        } else if let Some(command) = self.command.clone() {
+            commands.push(command);
         }
+        commands.extend(self.arguments.clone().unwrap_or_default());
+        commands
     }
 }
 
@@ -267,6 +297,8 @@ pub struct Builder {
     prune: bool,
     /// run all containers on build
     autorun: bool,
+    /// base image for image-less containers
+    image: Option<String>,
     /// output container logs on panic
     logs_on_panic: bool,
 }
@@ -287,6 +319,7 @@ impl Builder {
             clean: true,
             prune: true,
             autorun: true,
+            image: None,
             logs_on_panic: true,
         }
     }
@@ -311,22 +344,28 @@ impl Builder {
 
     /// add a mayastor container with a name
     pub fn add_container(mut self, name: &str) -> Builder {
-        self.containers
-            .push(ContainerSpec::new(name, Binary::from_dbg("mayastor")));
+        self.containers.push(ContainerSpec::from_binary(
+            name,
+            Binary::from_dbg("mayastor"),
+        ));
         self
     }
 
     /// add a generic container which runs a local binary
-    pub fn add_container_spec(mut self, mut spec: ContainerSpec) -> Builder {
-        spec.setup_nats(&self.name);
-
+    pub fn add_container_spec(mut self, spec: ContainerSpec) -> Builder {
         self.containers.push(spec);
         self
     }
 
     /// add a generic container which runs a local binary
-    pub fn add_container_bin(self, name: &str, bin: Binary) -> Builder {
-        self.add_container_spec(ContainerSpec::new(name, bin))
+    pub fn add_container_bin(self, name: &str, mut bin: Binary) -> Builder {
+        bin.setup_nats(&self.name);
+        self.add_container_spec(ContainerSpec::from_binary(name, bin))
+    }
+
+    /// add a docker container
+    pub fn add_container_image(self, name: &str, image: Binary) -> Builder {
+        self.add_container_spec(ContainerSpec::from_binary(name, image))
     }
 
     /// clean on drop?
@@ -347,9 +386,20 @@ impl Builder {
         self
     }
 
+    /// use base image for all binary containers
+    /// note, the image must be present locally
+    /// todo: pull image, if not present
+    pub fn with_base_image<S: Into<Option<String>>>(
+        mut self,
+        image: S,
+    ) -> Builder {
+        self.image = image.into();
+        self
+    }
+
     /// setup tracing for the cargo test code with `RUST_LOG` const
     pub fn with_default_tracing(self) -> Self {
-        self.with_tracing(RUST_LOG)
+        self.with_tracing(RUST_LOG_DEFAULT)
     }
 
     /// setup tracing for the cargo test code with `filter`
@@ -409,6 +459,7 @@ impl Builder {
             label_prefix: "io.mayastor.test".to_string(),
             clean: self.clean,
             prune: self.prune,
+            image: self.image,
             logs_on_panic: self.logs_on_panic,
         };
 
@@ -461,6 +512,8 @@ pub struct ComposeTest {
     /// automatically clean up the things we have created for this test
     clean: bool,
     pub prune: bool,
+    /// base image for image-less containers
+    image: Option<String>,
     logs_on_panic: bool,
 }
 
@@ -729,13 +782,10 @@ impl ComposeTest {
             },
         );
 
-        let mut env = spec.env_to_vec();
+        let mut env = spec.environment();
         env.push(format!("MY_POD_IP={}", ipv4));
 
-        let cmd: Vec<String> = spec.into();
-        let name = spec.name.as_str();
-
-        // figure out why ports to expose based on the port mapping
+        // figure out which ports to expose based on the port mapping
         let mut exposed_ports = HashMap::new();
         if let Some(map) = spec.port_map.as_ref() {
             map.iter().for_each(|binding| {
@@ -743,11 +793,18 @@ impl ComposeTest {
             })
         }
 
+        let name = spec.name.as_str();
+        let cmd = spec.commands();
+        let cmd = cmd.iter().map(|s| s.as_str()).collect();
+        let image = spec
+            .image
+            .as_ref()
+            .map_or_else(|| self.image.as_deref(), |s| Some(s.as_str()));
         let name_label = format!("{}.name", self.label_prefix);
         let config = Config {
-            cmd: Some(cmd.iter().map(|s| s.as_str()).collect()),
+            cmd: Some(cmd),
             env: Some(env.iter().map(|s| s.as_str()).collect()),
-            image: None, // notice we do not have a base image here
+            image,
             hostname: Some(name),
             host_config: Some(host_config),
             networking_config: Some(NetworkingConfig {
@@ -988,7 +1045,7 @@ mod tests {
             .name("composer")
             .network("10.1.0.0/16")
             .add_container_spec(
-                ContainerSpec::new(
+                ContainerSpec::from_binary(
                     "nats",
                     Binary::from_nix("nats-server").with_arg("-DV"),
                 )

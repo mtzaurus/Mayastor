@@ -15,6 +15,7 @@
 pub mod versions;
 
 use actix_web::{body::Body, client::Client};
+use actix_web_opentelemetry::ClientExt;
 use serde::Deserialize;
 use std::{io::BufReader, string::ToString};
 
@@ -53,8 +54,13 @@ impl ActixRestClient {
     {
         let uri = format!("{}{}", self.url, urn);
 
-        let mut rest_response =
-            self.client.get(uri.clone()).send().await.map_err(|error| {
+        let mut rest_response = self
+            .client
+            .get(uri.clone())
+            .trace_request()
+            .send()
+            .await
+            .map_err(|error| {
                 anyhow::anyhow!(
                     "Failed to get uri '{}' from rest, err={:?}",
                     uri,
@@ -82,6 +88,7 @@ impl ActixRestClient {
             .client
             .put(uri.clone())
             .content_type("application/json")
+            .trace_request()
             .send_body(body)
             .await
             .map_err(|error| {
@@ -104,6 +111,7 @@ impl ActixRestClient {
         let mut rest_response = self
             .client
             .delete(uri.clone())
+            .trace_request()
             .send()
             .await
             .map_err(|error| {

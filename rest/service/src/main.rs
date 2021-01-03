@@ -9,6 +9,8 @@ use rustls::{
 use std::io::BufReader;
 use structopt::StructOpt;
 
+use actix_web::{web, HttpRequest};
+
 #[derive(Debug, StructOpt)]
 struct CliArgs {
     /// The Rest Server address to bind to
@@ -29,8 +31,19 @@ fn init_tracing() {
     }
 }
 
+use actix_web_opentelemetry::RequestTracing;
+use opentelemetry::{global, sdk::propagation::TraceContextPropagator};
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    // Start a new jaeger trace pipeline
+    global::set_text_map_propagator(TraceContextPropagator::new());
+    let (_tracer, _uninstall) = opentelemetry_jaeger::new_pipeline()
+        .with_agent_endpoint("10.1.0.8:6831")
+        .with_service_name("actix_server")
+        .install()
+        .expect("pipeline install error");
+
     init_tracing();
     mbus_api::message_bus_init(CliArgs::from_args().nats).await;
 
@@ -48,7 +61,9 @@ async fn main() -> std::io::Result<()> {
 
     HttpServer::new(move || {
         App::new()
-            .wrap(middleware::Logger::default())
+            .wrap(RequestTracing::new())
+            .service(web::resource("/users/{id}").to(index))
+            //.wrap(middleware::Logger::default())
             .service(v0::nodes::factory())
             .service(v0::pools::factory())
             .service(v0::replicas::factory())
@@ -56,7 +71,15 @@ async fn main() -> std::io::Result<()> {
             .service(v0::children::factory())
             .service(v0::volumes::factory())
     })
-    .bind_rustls(CliArgs::from_args().rest, config)?
+    //.bind_rustls(CliArgs::from_args().rest, config)?
+    .bind(CliArgs::from_args().rest)?
     .run()
     .await
+}
+
+async fn index(
+    _req: HttpRequest,
+    _path: actix_web::web::Path<String>,
+) -> &'static str {
+    "Hello world!"
 }

@@ -1,4 +1,6 @@
 use super::*;
+use tracing_futures::Instrument;
+use tracing::info_span;
 
 /// Context with the gRPC clients
 pub struct GrpcContext {
@@ -203,7 +205,7 @@ pub trait NodeWrapperTrait:
     where
         Self: Sized,
     {
-        MessageBus::get_nodes().await.context(BusGetNodes {})
+        MessageBus::get_nodes().instrument(info_span!("say_hello")).await.context(BusGetNodes {})
     }
 
     /// Get the internal id

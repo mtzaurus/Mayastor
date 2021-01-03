@@ -26,8 +26,11 @@ async fn get_nexus_children(
 #[get("/v0/nodes/{node_id}/nexuses/{nexus_id}/children")]
 async fn get_node_nexus_children(
     web::Path((node_id, nexus_id)): web::Path<(String, String)>,
-) -> impl Responder {
-    get_children_response(Filter::NodeNexus(node_id, nexus_id)).await
+) -> Result<HttpResponse, RestError> {
+    let children = MessageBus::get_nexus(Filter::NodeNexus(node_id, nexus_id))
+        .await?
+        .children;
+    Ok(HttpResponse::Ok().json(()))
 }
 
 #[get("/v0/nexuses/{nexus_id}/children/{child_id:.*}")]
@@ -101,17 +104,22 @@ async fn get_child_response(
     child_id: String,
     req: HttpRequest,
     filter: Filter,
-) -> impl Responder {
+) -> Result<HttpResponse, RestError> {
     let child_id = build_child_uri(child_id, req);
     let child = match MessageBus::get_nexus(filter).await {
         Ok(nexus) => find_nexus_child(&nexus, &child_id),
         Err(error) => Err(error),
-    };
-    match child {
-        Ok(child) => HttpResponse::Ok().json(child),
-        Err(error) => (RestError::from(error)).into(),
-    }
+    }?;
+
+    Ok(HttpResponse::Ok().json(Child::default()))
 }
+
+// fn map_e<T> (r: Result<T, BusError>) -> HttpResponse {
+//     match r {
+//         Ok(child) => HttpResponse::Ok().json(child),
+//         Err(error) => (RestError::from(error)).into(),
+//     }
+// }
 
 fn find_nexus_child(nexus: &Nexus, child_uri: &str) -> Result<Child, BusError> {
     if let Some(child) = nexus.children.iter().find(|&c| c.uri == child_uri) {

@@ -314,7 +314,7 @@ impl From<i32> for PoolState {
 #[derive(Serialize, Deserialize, Default, Debug, Clone, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Pool {
-    /// name of the mayastor instance
+    /// id of the mayastor instance
     pub node: String,
     /// name of the pool
     pub name: String,
@@ -563,7 +563,7 @@ pub struct GetNexuses {
 pub struct Nexus {
     /// id of the mayastor instance
     pub node: String,
-    /// name of the nexus
+    /// uuid of the nexus
     pub uuid: String,
     /// size of the volume in bytes
     pub size: u64,
@@ -768,7 +768,7 @@ bus_impl_message_all!(GetVolumes, GetVolumes, Volumes, Volume);
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateVolume {
-    /// name of the volume
+    /// uuid of the volume
     pub uuid: String,
     /// size of the volume in bytes
     pub size: u64,
@@ -792,7 +792,7 @@ bus_impl_message_all!(CreateVolume, CreateVolume, Volume, Volume);
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct DestroyVolume {
-    /// name of the volume
+    /// uuid of the volume
     pub uuid: String,
 }
 bus_impl_message_all!(DestroyVolume, DestroyVolume, (), Volume);
@@ -801,9 +801,9 @@ bus_impl_message_all!(DestroyVolume, DestroyVolume, (), Volume);
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct AddVolumeNexus {
-    /// name of the volume
+    /// uuid of the volume
     pub uuid: String,
-    /// preferred node for the nexus
+    /// preferred node id for the nexus
     pub preferred_node: Option<String>,
 }
 bus_impl_message_all!(AddVolumeNexus, AddVolumeNexus, Nexus, Volume);
@@ -812,9 +812,9 @@ bus_impl_message_all!(AddVolumeNexus, AddVolumeNexus, Nexus, Volume);
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoveVolumeNexus {
-    /// name of the volume
+    /// uuid of the volume
     pub uuid: String,
-    /// node where nexus lives
+    /// if of the node where the nexus lives
     pub node: Option<String>,
 }
 bus_impl_message_all!(RemoveVolumeNexus, RemoveVolumeNexus, (), Volume);
