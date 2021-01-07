@@ -3,7 +3,7 @@
 set -eux
 
 SCRIPTDIR=$(dirname "$(realpath "$0")")
-TESTS="install basic_volume_io node_disconnect/replica_pod_remove"
+TESTS="install basic_volume_io"
 LONG_TESTS=""
 RUN_LONG_TESTS=
 DEVICE=
@@ -95,9 +95,10 @@ if [ -z "$test_failed" ] && [ -n "$RUN_LONG_TESTS" ]; then
     fi
   done
 fi
-if [ -n "$test_failed" ]; then
-  "$SCRIPTDIR"/e2e-cluster-dump.sh
-fi
+# TODO: enable when the problem with dump script is fixed
+#if [ -n "$test_failed" ]; then
+#  "$SCRIPTDIR"/e2e-cluster-dump.sh
+#fi
 
 # must always run uninstall test in order to clean up the cluster
 cd "$SCRIPTDIR/../test/e2e/uninstall"
