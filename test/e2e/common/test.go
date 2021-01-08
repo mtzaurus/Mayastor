@@ -56,7 +56,7 @@ func SetupTestEnv() {
 
 	mgrSyncCtx, mgrSyncCtxCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer mgrSyncCtxCancel()
-	if synced := k8sManager.GetCache().WaitForCacheSync(mgrSyncCtx.Done()); !synced {
+	if synced := k8sManager.GetCache().WaitForCacheSync(mgrSyncCtx); !synced {
 		fmt.Println("Failed to sync")
 	}
 

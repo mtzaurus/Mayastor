@@ -3,14 +3,13 @@ package replica_pod_remove_test
 import (
 	"e2e-basic/common"
 	disconnect_lib "e2e-basic/node_disconnect/lib"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"testing"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
 var env disconnect_lib.DisconnectEnv
@@ -35,7 +34,7 @@ var _ = Describe("Mayastor replica pod removal test", func() {
 })
 
 var _ = BeforeSuite(func(done Done) {
-	logf.SetLogger(zap.LoggerTo(GinkgoWriter, true))
+	logf.SetLogger(zap.New(zap.UseDevMode(true), zap.WriteTo(GinkgoWriter)))
 	common.SetupTestEnv()
 	close(done)
 }, 60)
