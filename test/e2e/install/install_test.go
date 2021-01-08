@@ -221,7 +221,7 @@ func installMayastor() {
 	).Should(Equal(numMayastorInstances))
 
 	Eventually(moacReadyPodCount(),
-		"240s", // timeout
+		"360s", // timeout
 		"1s",   // polling interval
 	).Should(Equal(1))
 
