@@ -123,14 +123,16 @@ impl NexusFnTable {
             nio.reset(ch.writers.len())
         }
 
-        let nexus = nio.nexus_as_ref();
+        //let nexus = nio.nexus_as_ref();
+        let nexus = Bio::nexus_from_bio(nio);
+
         let io_type = nio.io_type();
         match io_type {
-            IoType::Read => nexus.readv(&nio, &mut ch),
-            IoType::Write => nexus.writev(&nio, &ch),
+            IoType::Read => nexus.readv(nio, &mut ch),
+            IoType::Write => nexus.writev(nio, &mut ch),
             IoType::Reset => {
                 trace!("{}: Dispatching RESET", nexus.bdev.name());
-                nexus.reset(&nio, &ch)
+                nexus.reset(nio, &ch)
             }
             IoType::Unmap => {
                 if nexus.io_is_supported(io_type) {

@@ -5,6 +5,7 @@ use crate::{
 use async_trait::async_trait;
 use merge::Merge;
 use std::os::raw::c_void;
+use std::fmt::Debug;
 
 #[derive(Debug, Default, Clone, Copy, Merge)]
 pub struct BlockDeviceIoStats {

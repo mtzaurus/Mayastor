@@ -33,6 +33,7 @@ use crate::{
 
 mod malloc;
 mod nvmx;
+mod nvmf;
 
 impl Uri {
     pub fn parse(
@@ -47,7 +48,8 @@ impl Uri {
 
         match url.scheme() {
             // backend NVMF target - fairly unstable (as of Linux 5.2)
-            "nvmf" => Ok(Box::new(nvmx::NvmfDeviceTemplate::try_from(&url)?)),
+            "nvmf" => Ok(Box::new(nvmf::Nvmf::try_from(&url)?)),
+            "nvmx" => Ok(Box::new(nvmx::NvmfDeviceTemplate::try_from(&url)?)),
             "malloc" => Ok(Box::new(malloc::Malloc::try_from(&url)?)),
 
             scheme => Err(NexusBdevError::UriSchemeUnsupported {

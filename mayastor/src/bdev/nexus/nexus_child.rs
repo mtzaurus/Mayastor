@@ -19,8 +19,9 @@ use crate::{
         nexus_lookup,
         NexusErrStore,
         VerboseError,
+        device_lookup,
     },
-    core::{Bdev, BdevHandle, CoreError, Descriptor, Reactor, Reactors},
+    core::{Bdev, BdevHandle, CoreError, Descriptor, Reactor, Reactors, BlockDevice},
     nexus_uri::{bdev_create, bdev_destroy, NexusBdevError},
     rebuild::{ClientOperations, RebuildJob},
     subsys::Config,
@@ -126,7 +127,7 @@ impl Display for ChildState {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 pub struct NexusChild {
     /// name of the parent this child belongs too
     pub(crate) parent: String,
@@ -149,6 +150,17 @@ pub struct NexusChild {
     pub(crate) err_store: Option<NexusErrStore>,
     #[serde(skip_serializing)]
     remove_channel: (mpsc::Sender<()>, mpsc::Receiver<()>),
+
+    #[serde(skip_serializing)]
+    pub(crate) nvmx_device: Option<Box<dyn BlockDevice>>,
+}
+
+use std::fmt;
+
+impl std::fmt::Debug for NexusChild {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "Parent: {}, name: {}", &self.parent, &self.name)
+    }
 }
 
 impl Display for NexusChild {
@@ -260,6 +272,7 @@ impl NexusChild {
         self.set_state(ChildState::Open);
 
         debug!("{}: child {} opened successfully", self.parent, self.name);
+
         Ok(self.name.clone())
     }
 
@@ -461,7 +474,7 @@ impl NexusChild {
     }
 
     /// create a new nexus child
-    pub fn new(name: String, parent: String, bdev: Option<Bdev>) -> Self {
+    pub fn new(name: String, parent: String, bdev: Option<Bdev>, nvmx: Option<Box<BlockDevice>>) -> Self {
         NexusChild {
             name,
             bdev,
@@ -471,6 +484,7 @@ impl NexusChild {
             prev_state: AtomicCell::new(ChildState::Init),
             err_store: None,
             remove_channel: mpsc::channel(0),
+            nvmx_device: nvmx,
         }
     }
 

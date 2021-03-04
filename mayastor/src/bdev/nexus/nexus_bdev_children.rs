@@ -41,6 +41,7 @@ use crate::{
             nexus_child::{ChildState, NexusChild},
             nexus_child_status_config::ChildStatusConfig,
         },
+        {device_create, device_lookup},
         Reason,
         VerboseError,
     },
@@ -62,6 +63,7 @@ impl Nexus {
                     c.clone(),
                     self.name.clone(),
                     Bdev::lookup_by_name(c),
+                    None,
                 ))
             })
             .for_each(drop);
@@ -74,11 +76,24 @@ impl Nexus {
         uri: &str,
     ) -> Result<(), NexusBdevError> {
         assert_eq!(*self.state.lock().unwrap(), NexusState::Init);
-        let name = bdev_create(&uri).await?;
+        let devs: Vec<&str> = uri.split(";").collect();
+        println!("{:?}", devs);
+
+        println!("=============================== OPEN-1: {}", devs[0]);
+        let name = bdev_create(devs[0]).await?;
+        println!("=============================== OPEN-2: {}", devs[1]);
+        let bname = device_create(devs[1]).await?;
+        println!("=============================== OPEN-DONE ======================");
+        Bdev::lookup_by_name(&name).unwrap();
+        println!("=============================== LOOKUP-1 ======================");
+        device_lookup(&bname).unwrap();
+        println!("=============================== LOOKUP-2 ======================");
+
         self.children.push(NexusChild::new(
             uri.to_string(),
             self.name.clone(),
             Bdev::lookup_by_name(&name),
+            device_lookup(&bname),
         ));
 
         self.child_count += 1;
@@ -163,6 +178,7 @@ impl Nexus {
             uri.to_owned(),
             self.name.clone(),
             Some(child_bdev),
+            None,
         );
         match child.open(self.size) {
             Ok(name) => {

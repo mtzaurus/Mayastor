@@ -196,7 +196,7 @@ impl<'probe> NvmeControllerContext<'probe> {
 
     /// unregister the poller used during connect/attach
     pub(crate) fn unregister_poller(&mut self) {
-        self.poller.take().expect("No poller registered");
+        //self.poller.take().expect("No poller registered");
     }
 
     pub fn name(&self) -> String {
@@ -228,10 +228,13 @@ impl CreateDestroy for NvmfDeviceTemplate {
                 .expect("failed to create new NVMe controller instance"),
         ));
 
+        println!("============================= A: name = {}", cname);
         NVME_CONTROLLERS.insert_controller(cname.clone(), rc);
 
+        println!("============================= B");
         let mut context = NvmeControllerContext::new(self);
 
+        println!("============================= C");
         // Initiate connection with remote NVMe target.
         let probe_ctx = NonNull::new(unsafe {
             spdk_nvme_connect_async(
@@ -243,6 +246,7 @@ impl CreateDestroy for NvmfDeviceTemplate {
 
         if probe_ctx.is_none() {
             // Remove controller record before returning error.
+            error!("=============================== FAILED");
             NVME_CONTROLLERS.remove_by_name(&cname).unwrap();
             return Err(NexusBdevError::CreateBdev {
                 name: cname,
@@ -250,6 +254,7 @@ impl CreateDestroy for NvmfDeviceTemplate {
             });
         }
 
+        println!("============================= D");
         let poller = poller::Builder::new()
             .with_name("nvme_async_probe_poller")
             .with_interval(1000)
@@ -260,6 +265,7 @@ impl CreateDestroy for NvmfDeviceTemplate {
 
         context.poller = Some(poller);
 
+        println!("============================= E");
         context
             .receiver
             .await

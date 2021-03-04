@@ -52,7 +52,7 @@ use crate::{
             nexus_nbd::{NbdDisk, NbdError},
         },
     },
-    core::{Bdev, CoreError, Protocol, Reactor, Share},
+    core::{Bdev, CoreError, DmaError, Protocol, Reactor, Share, BlockDeviceHandle},
     ffihelper::errno_result_from_i32,
     lvs::Lvol,
     nexus_uri::{bdev_destroy, NexusBdevError},
@@ -66,6 +66,10 @@ use std::ptr::NonNull;
 pub trait VerboseError {
     fn verbose(&self) -> String;
 }
+
+const USE_NVMX: bool = false;
+
+const NEXUS_SIZE: usize = std::mem::size_of::<Nexus>();
 
 impl<T> VerboseError for T
 where
@@ -330,6 +334,8 @@ pub struct Nexus {
     pub nexus_target: Option<NexusTarget>,
     /// the maximum number of times to attempt to send an IO
     pub(crate) max_io_attempts: i32,
+
+    io_multiplexer: NexusIoMultiplexer,
 }
 
 unsafe impl core::marker::Sync for Nexus {}
@@ -389,6 +395,123 @@ impl Drop for Nexus {
     }
 }
 
+#[derive(Debug)]
+struct NexusIoMultiplexer {
+    data_offset: u64,
+    name: String,
+}
+
+impl NexusIoMultiplexer {
+    pub fn new(name: String, data_offset: u64) -> Self {
+        Self {
+            data_offset,
+            name,
+        }
+    }
+
+    pub fn set_data_offset(&mut self, data_offset: u64) {
+        self.data_offset = data_offset;
+        info!("[xxx] offset set = {}", self.data_offset);
+    }
+
+    fn io_completion_cb(
+        success: bool,
+        parent_io: *mut c_void,
+    ) {
+        let mut pio = Bio::from(parent_io);
+
+        if !success {
+            error!("I/O failed !");
+            pio.ctx_as_mut_ref().status = IoStatus::Failed;
+        } else {
+            pio.ctx_as_mut_ref().status = IoStatus::Success;
+        }
+        pio.assess_nvmx(success);
+    }
+
+    #[inline]
+    fn terminate_io(&self, num_submitted: usize, io: &mut Bio) {
+        println!("[terminate_io]: num_submitted={}", num_submitted);
+        if num_submitted == 0 {
+                error!(
+                    "{}: Failed to submit dispatched IO {:p}",
+                    self.name,
+                    io.as_ptr()
+                );    
+                io.fail();
+        } else {
+            io.ctx_as_mut_ref().in_flight = num_submitted as i8;
+            io.ctx_as_mut_ref().fail_fast = true;
+        }
+    }
+
+    #[inline]
+    pub fn reset(&self, channel: &NexusChannelInner, io: &mut Bio) {
+        for (i, h) in channel._writers.iter().enumerate() {
+            if let Err(e) = h.reset(
+                NexusIoMultiplexer::io_completion_cb,
+                io.as_ptr() as *mut _
+            ) {
+                self.terminate_io(i, io);
+                break;
+            }
+        }
+    }
+
+    #[inline]
+    pub fn writev(&self, channel: &NexusChannelInner, io: &mut Bio) {
+        /* println!(
+            "[writev] iovcnt={}, offset={}, num_blocks={}, data_offset={}",
+            io.iov_count(),
+            io.offset(),
+            io.num_blocks(),
+            self.data_offset,
+        ); */
+        for (i, h) in channel._writers.iter().enumerate() {
+            if let Err(e) = h.writev_blocks(
+                io.iovs(),
+                io.iov_count(),
+                io.offset() + self.data_offset,
+                io.num_blocks(),
+                NexusIoMultiplexer::io_completion_cb,
+                io.as_ptr() as *mut _
+            ) {
+                self.terminate_io(i, io);
+                break;
+            }
+        }
+        //println!("[writev] done");
+    }
+
+    #[inline]
+    pub fn readv(&self, channel: &mut NexusChannelInner, io: &mut Bio) {
+        let child_id = match channel.child_select() {
+            Some(child_idx) => child_idx,
+            None => {
+                error!(
+                    "{}: No child available to read from {:p}",
+                    self.name,
+                    io.as_ptr(),
+                );
+                io.fail();
+                return;
+            }
+        };
+
+        let h = channel._readers.get(child_id).unwrap();
+        if let Err(e) = h.readv_blocks(
+            io.iovs(),
+            io.iov_count(),
+            io.offset() + self.data_offset,
+            io.num_blocks(),
+            NexusIoMultiplexer::io_completion_cb,
+            io.as_ptr() as *mut _
+        ) {
+            io.fail();
+        }
+    }
+}
+
 impl Nexus {
     /// create a new nexus instance with optionally directly attaching
     /// children to it.
@@ -422,6 +545,7 @@ impl Nexus {
             size,
             nexus_target: None,
             max_io_attempts: cfg.err_store_opts.max_io_attempts,
+            io_multiplexer: NexusIoMultiplexer::new( name.to_string(), 0 ),
         });
 
         n.bdev.set_uuid(match uuid {
@@ -482,9 +606,14 @@ impl Nexus {
     pub async fn open(&mut self) -> Result<(), Error> {
         debug!("Opening nexus {}", self.name);
 
+        println!("--------------------------------- open(): 1");
         self.try_open_children().await?;
+        println!("--------------------------------- open(): 2");
         self.sync_labels().await?;
-        self.register().await
+        println!("--------------------------------- open(): 3");
+        let r = self.register().await?;
+        println!("--------------------------------- open(): 4");
+        Ok(r)
     }
 
     pub async fn sync_labels(&mut self) -> Result<(), Error> {
@@ -508,6 +637,7 @@ impl Nexus {
         self.validate_child_labels().await.context(ReadLabel {
             name: self.name.clone(),
         })?;
+        self.io_multiplexer.set_data_offset(label.offset());
 
         Ok(())
     }
@@ -774,7 +904,7 @@ impl Nexus {
     }
 
     /// read vectored io from the underlying children.
-    pub(crate) fn readv(&self, io: &Bio, channels: &mut NexusChannelInner) {
+    pub(crate) fn _readv(&self, io: &mut Bio, channels: &mut NexusChannelInner) {
         // we use RR to read from the children.
         let child = channels.child_select();
         if child.is_none() {
@@ -790,6 +920,7 @@ impl Nexus {
         // if there is no buffer space for us allocated within the request
         // allocate it now, taking care of proper alignment
         if io.need_buf() {
+            assert!(false, "I/O needed !");
             unsafe {
                 spdk_bdev_io_get_buf(
                     io.as_ptr(),
@@ -856,7 +987,7 @@ impl Nexus {
     }
 
     /// send reset IO to the underlying children.
-    pub(crate) fn reset(&self, io: &Bio, channels: &NexusChannelInner) {
+    pub(crate) fn _reset(&self, io: &mut Bio, channels: &NexusChannelInner) {
         // in case of resets, we want to reset all underlying children
         let results = channels
             .writers
@@ -876,8 +1007,35 @@ impl Nexus {
         self.check_io_submission(&results, &io);
     }
 
+    ///////// NVMx
+    pub(crate) fn writev(&self, io: &mut Bio, channel: &NexusChannelInner) {
+        if USE_NVMX {
+            self.io_multiplexer.writev(channel, io);
+        } else {
+            self._writev(io, channel);
+        }
+    }
+
+    pub(crate) fn readv(&self, io: &mut Bio, channel: &mut NexusChannelInner) {
+        if USE_NVMX {
+            self.io_multiplexer.readv(channel, io);
+        } else {
+            self._readv(io, channel);
+        }
+    }
+
+    /// send reset IO to the underlying children.
+    pub(crate) fn reset(&self, io: &mut Bio, channel: &NexusChannelInner) {
+        if USE_NVMX {
+            self.io_multiplexer.reset(channel, io);
+        } else {
+            self._reset(io, channel);
+        }
+    }
+    ///////// NVMx
+
     /// write vectored IO to the underlying children.
-    pub(crate) fn writev(&self, io: &Bio, channels: &NexusChannelInner) {
+    pub(crate) fn _writev(&self, io: &mut Bio, channels: &NexusChannelInner) {
         // in case of writes, we want to write to all underlying children
         let results = channels
             .writers

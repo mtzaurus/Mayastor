@@ -39,6 +39,9 @@ pub struct NioCtx {
     pub(crate) status: IoStatus,
     /// attempts left
     pub(crate) io_attempts: i32,
+
+    /// Fail-fast the operation.
+    pub(crate) fail_fast: bool
 }
 
 impl NioCtx {
@@ -271,7 +274,7 @@ impl Bio {
     }
 
     #[inline]
-    pub(crate) fn complete(&mut self) {
+    fn complete(&mut self) {
         let pio_ctx = self.ctx_as_mut_ref();
         if pio_ctx.in_flight == 0 {
             if pio_ctx.status == IoStatus::Failed {
@@ -311,6 +314,13 @@ impl Bio {
                 child_io.bdev_as_ref(),
             ));
         }
+
+        self.complete();
+    }
+
+    #[inline]
+    pub(crate) fn assess_nvmx(&mut self, success: bool) {
+        self.ctx_as_mut_ref().dec();
 
         self.complete();
     }
@@ -360,6 +370,12 @@ impl Bio {
     /// obtain the Nexus struct embedded within the bdev
     pub(crate) fn nexus_as_ref(&self) -> &Nexus {
         let b = self.bdev_as_ref();
+        assert_eq!(b.product_name(), NEXUS_PRODUCT_ID);
+        unsafe { Nexus::from_raw((*b.as_ptr()).ctxt) }
+    }
+
+    pub(crate) fn nexus_from_bio<'a>(io: &Bio) -> &'a Nexus {
+        let b = io.bdev_as_ref();
         assert_eq!(b.product_name(), NEXUS_PRODUCT_ID);
         unsafe { Nexus::from_raw((*b.as_ptr()).ctxt) }
     }

@@ -1,6 +1,6 @@
 //!
 //! IO is driven by means of so called channels.
-use std::{ffi::c_void, ptr::NonNull};
+use std::{ffi::c_void, ptr::NonNull, fmt};
 
 use futures::channel::oneshot;
 
@@ -15,8 +15,8 @@ use spdk_sys::{
 };
 
 use crate::{
-    bdev::{nexus::nexus_child::ChildState, Nexus, Reason},
-    core::{BdevHandle, Mthread},
+    bdev::{nexus::nexus_child::ChildState, Nexus, Reason, device_open},
+    core::{BdevHandle, Mthread, BlockDeviceHandle},
 };
 
 /// io channel, per core
@@ -27,12 +27,21 @@ pub(crate) struct NexusChannel {
 }
 
 #[repr(C)]
-#[derive(Debug)]
 pub(crate) struct NexusChannelInner {
     pub(crate) writers: Vec<BdevHandle>,
     pub(crate) readers: Vec<BdevHandle>,
     pub(crate) previous: usize,
     device: *mut c_void,
+
+    // NVMx.
+    pub(crate) _writers: Vec<Box<dyn BlockDeviceHandle>>,
+    pub(crate) _readers: Vec<Box<dyn BlockDeviceHandle>>,
+}
+
+impl fmt::Debug for NexusChannelInner {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "#readers: {}, #writers: {}", self._readers.len(), self._writers.len())
+    }
 }
 
 #[derive(Debug)]
@@ -176,6 +185,9 @@ impl NexusChannel {
             readers: Vec::new(),
             previous: 0,
             device,
+
+            _readers: Vec::new(),
+            _writers: Vec::new(),
         });
 
         nexus
@@ -192,6 +204,23 @@ impl NexusChannel {
                     error!("Failed to get handle for {}, skipping bdev", c)
                 }
             });
+
+        println!("*****************************************************************");
+        nexus
+            .children
+            .iter_mut()
+            .for_each(|c| {
+                println!("************************** opening R");
+                let r = c.nvmx_device.as_mut().unwrap().open(true).unwrap().into_handle().unwrap();
+                println!("************************** opening W");
+                let w = c.nvmx_device.as_mut().unwrap().open(true).unwrap().into_handle().unwrap();
+                println!("************************** opening done");
+
+                channels._readers.push(r);
+                channels._writers.push(w);
+            });
+        println!("*****************************************************************");
+
         ch.inner = Box::into_raw(channels);
         0
     }

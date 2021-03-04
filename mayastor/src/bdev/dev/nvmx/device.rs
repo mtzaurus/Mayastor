@@ -276,6 +276,7 @@ impl DeviceIoController for NvmeDeviceIoController {
  * Lookup target NVMeOF device by its name (starts with nvmf://).
  */
 pub fn lookup_by_name(name: &str) -> Option<Box<dyn BlockDevice>> {
+    println!("=====> LOOKUP: {}", name);
     if let Some(c) = NVME_CONTROLLERS.lookup_by_name(name) {
         let controller = c.lock().expect("mutex poisoned");
         // Make sure controller is available.
