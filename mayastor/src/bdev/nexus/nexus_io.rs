@@ -333,7 +333,7 @@ impl Bio {
                         child,
                     );
 
-                    let uri = child.name.clone();
+                    let uri = child.get_name().to_string();
                     nexus.pause().await.unwrap();
                     nexus.reconfigure(DrEvent::ChildFault).await;
                     //nexus.remove_child(&uri).await.unwrap();

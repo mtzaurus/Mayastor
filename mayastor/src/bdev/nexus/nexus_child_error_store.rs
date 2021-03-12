@@ -279,6 +279,8 @@ impl Nexus {
             }
         };
         trace!("Adding error record {:?} bdev {:?}", io_op_type, bdev);
+        assert!(false, "future_error_record_add() called");
+        /*
         for child in nexus.children.iter_mut() {
             if let Some(bdev) = child.bdev.as_ref() {
                 if bdev.as_ptr() as *const _ == bdev {
@@ -329,6 +331,7 @@ impl Nexus {
             }
             //error!("Failed to record error - could not find child");
         }
+        */
     }
 
     pub fn error_record_query(
@@ -347,7 +350,7 @@ impl Nexus {
         let cfg = Config::get();
         if cfg.err_store_opts.enable_err_store {
             if let Some(child) =
-                self.children.iter().find(|c| c.name == child_name)
+                self.children.iter().find(|c| c.get_name() == child_name)
             {
                 if child.err_store.as_ref().is_some() {
                     Ok(Some(child.err_store.as_ref().unwrap().query(

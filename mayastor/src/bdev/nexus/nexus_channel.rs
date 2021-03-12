@@ -117,6 +117,7 @@ impl NexusChannelInner {
         self.readers.clear();
         self.previous = 0;
 
+        /*
         // iterate over all our children which are in the open state
         nexus
             .children
@@ -132,7 +133,9 @@ impl NexusChannelInner {
                     error!("failed to create handle for {}", c);
                 }
             });
+            */
 
+        /*
         // then add write-only children
         if !self.readers.is_empty() {
             nexus
@@ -148,6 +151,7 @@ impl NexusChannelInner {
                     }
                 });
         }
+        */
 
         trace!(
             "{}: New number of IO channels write:{} read:{} out of {} children",
@@ -178,6 +182,7 @@ impl NexusChannel {
             device,
         });
 
+        /*
         nexus
             .children
             .iter_mut()
@@ -192,6 +197,7 @@ impl NexusChannel {
                     error!("Failed to get handle for {}, skipping bdev", c)
                 }
             });
+        */
         ch.inner = Box::into_raw(channels);
         0
     }
